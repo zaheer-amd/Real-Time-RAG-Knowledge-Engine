@@ -35,7 +35,7 @@ This system bridges traditional streaming data engineering with modern Generativ
 ### Quick Start (Local Deployment)
 
 1. **Clone the repository:**
-   git clone https://github.com/your-username/real-time-rag-engine.git
+   git clone https://github.com/zaheer-amd/real-time-rag-engine.git
    cd real-time-rag-engine
 
 2. **Spin up the infrastructure:**
