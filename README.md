@@ -48,7 +48,7 @@ Start the underlying message broker and vector database using Docker Compose:
 ```bash
 docker-compose up -d
 
-2. Environment Setup
+### 2. Environment Setup
 It is highly recommended to use a virtual environment to avoid dependency conflicts with enterprise data tools.
 
 Bash
