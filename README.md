@@ -43,10 +43,9 @@ The pipeline is completely decoupled and runs across three main asynchronous lay
 * **Python 3.10** (Required for stable LangChain/Milvus integrations)
 * **Ollama** installed locally with the Llama 3 model downloaded (`ollama run llama3`)
 
-### 1. Infrastructure Setup
-Start the underlying message broker and vector database using Docker Compose:
-```bash
-docker-compose up -d
+
+1. Infrastructure Setup
+Start the underlying message broker and vector database using Docker Compose: docker-compose up -d
 
 ### 2. Environment Setup
 It is highly recommended to use a virtual environment to avoid dependency conflicts with enterprise data tools.
