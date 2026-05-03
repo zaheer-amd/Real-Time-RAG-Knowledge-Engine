@@ -1,0 +1,17 @@
+# Environments
+.venv/
+env/
+venv/
+
+# Python Cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Docker/Local Data (if any gets mapped locally)
+data/
+volumes/
+
+# OS generated files
+.DS_Store
+Thumbs.db

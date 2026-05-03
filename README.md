@@ -1,75 +1,110 @@
 # 🧠 Real-Time RAG Knowledge Engine
 
-> **A production-ready, streaming Retrieval-Augmented Generation (RAG) pipeline.**
+An end-to-end, 100% locally hosted Retrieval-Augmented Generation (RAG) pipeline designed to ingest streaming corporate data and serve AI-driven answers in real-time. 
 
-This project demonstrates how to ingest real-time text streams, generate vector embeddings on the fly, maintain a historical Data Lakehouse, and serve a Large Language Model (LLM) with up-to-the-second context. 
+This project simulates a live corporate infrastructure, bridging the gap between high-speed data engineering (Apache Kafka, Vector Databases) and generative AI (Large Language Models, LangChain).
 
-## 🏗️ Architecture Overview
+---
 
-This system bridges traditional streaming data engineering with modern Generative AI infrastructure. It is built entirely on open-source, production-grade technologies designed for fault tolerance and high throughput.
+## 🏗️ System Architecture
 
-1. **Ingestion (The Firehose):** Apache Kafka acts as the message broker, safely queuing incoming documents, news feeds, or system logs.
-2. **Stream Processing (The Refinery):** Apache Flink consumes messages from Kafka, splits the text into semantic chunks, and generates vector embeddings in real-time.
-3. **Storage Layer (Dual-Write Sink):** - **Vector Database (Milvus/Qdrant):** Indexes the vector embeddings for low-latency similarity search.
-   - **Data Lakehouse (Apache Iceberg):** Persists the raw and processed chunks in cloud storage for historical backups, auditing, and future batch-training jobs.
-4. **AI Serving Layer:** A FastAPI backend utilizes LangChain to intercept user queries, embed them, retrieve context from the Vector DB, and stream the final answer using a local LLM (via Ollama).
+The pipeline is completely decoupled and runs across three main asynchronous layers:
+
+1. **The Firehose (Data Ingestion)**
+   * A Python producer simulates a live stream of internal IT logs and HR chats.
+   * Data is streamed into **Apache Kafka** (running via Docker) to ensure fault-tolerant, high-throughput queuing.
+
+2. **The Refinery (Stream Processing)**
+   * A Python processor continuously consumes the Kafka topic.
+   * Data is passed through a local HuggingFace embedding model (`all-MiniLM-L6-v2`) to translate text into 384-dimensional mathematical vectors.
+   * Vectors and metadata are upserted in real-time to **Milvus**, an enterprise-grade Vector Database.
+
+3. **The Serving Layer (FastAPI & GenAI)**
+   * A **FastAPI** web server handles incoming user queries.
+   * **LangChain** orchestrates the RAG workflow: it embeds the user's question, searches Milvus for the 3 nearest semantic neighbors (L2 Distance), and constructs a strict system prompt.
+   * **Llama 3** (running locally via Ollama) synthesizes the retrieved context into a human-readable, fact-based answer.
+
+---
 
 ## 🛠️ Tech Stack
 
-- **Message Broker:** Apache Kafka
-- **Stream Processing:** Apache Flink
-- **Data Lakehouse:** Apache Iceberg
-- **Vector Database:** Milvus
-- **Backend API:** FastAPI, Python 3.10+
-- **LLM Orchestration:** LangChain
-- **Local LLM:** Ollama (Llama 3 / Mistral)
-- **Infrastructure:** Docker, Docker Compose
+* **Data Engineering:** Apache Kafka, Zookeeper
+* **Vector Database:** Milvus, MinIO, etcd
+* **Stream Processing:** Python (`kafka-python`, `pymilvus`)
+* **AI / ML:** HuggingFace `SentenceTransformers`, Meta Llama 3 (via Ollama)
+* **Backend:** FastAPI, Uvicorn, Pydantic, LangChain (`langchain_community`)
+
+---
 
 ## 🚀 Getting Started
 
 ### Prerequisites
-- Docker & Docker Compose
-- Python 3.10+
-- At least 16GB of RAM (required to run the local LLM and streaming engine simultaneously)
+* **Docker Desktop** (for Kafka and Milvus containers)
+* **Python 3.10** (Required for stable LangChain/Milvus integrations)
+* **Ollama** installed locally with the Llama 3 model downloaded (`ollama run llama3`)
 
-### Quick Start (Local Deployment)
+### 1. Infrastructure Setup
+Start the underlying message broker and vector database using Docker Compose:
+```bash
+docker-compose up -d
 
-1. **Clone the repository:**
-   git clone https://github.com/zaheer-amd/real-time-rag-engine.git
-   cd real-time-rag-engine
+2. Environment Setup
+It is highly recommended to use a virtual environment to avoid dependency conflicts with enterprise data tools.
 
-2. **Spin up the infrastructure:**
-   This will start Kafka, Flink, Milvus, and Iceberg catalogs.
-   docker-compose up -d
+Bash
+# Create the virtual environment
+py -3.10 -m venv .venv
 
-3. **Start the Ollama container and pull the model:**
-   docker exec -it ollama-container ollama run llama3
+# Activate it (Windows)
+.\.venv\Scripts\activate
 
-4. **Run the FastAPI server:**
-   pip install -r requirements.txt
-   uvicorn app.main:app --reload
+# Install all dependencies
+pip install -r requirements.txt
 
-## 📂 Project Structure
+🏃‍♂️ Running the Pipeline
+Because this is a real-time streaming architecture, you need to run the three components simultaneously in separate terminal windows. Make sure your .venv is activated in all three!
 
-├── docker-compose.yml       # Infrastructure definition
-├── ingestion/               # Kafka producers (mock data generators)
-├── stream_processing/       # Flink jobs for chunking and embedding
-├── serving/                 # FastAPI and LangChain backend
-│   ├── routes.py            # API endpoints
-│   ├── llm_service.py       # Langchain setup and Ollama integration
-│   └── retriever.py         # Milvus connection and similarity search
-├── notebooks/               # Jupyter notebooks for data exploration
-├── requirements.txt         # Python dependencies
-└── README.md
+Terminal 1: Start the Data Firehose
 
-## 📈 Key Concepts Demonstrated
+Bash
+python ingestion/mock_producer.py
+You should see mock data continuously sending to Kafka.
 
-- **Real-Time AI:** Moving beyond batch-processed RAG pipelines to sub-second streaming context updates.
-- **Fault Tolerance:** Utilizing Kafka consumer offsets to guarantee no data loss if the embedding pipeline crashes.
-- **Lakehouse Architecture:** Implementing Apache Iceberg to ensure ACID compliance on raw data lakes, preventing vendor lock-in with vector databases.
+Terminal 2: Start the Vector Processor
 
-## 🤝 Contributing
-Contributions, issues, and feature requests are welcome! 
+Bash
+python stream_processing/flink_processor.py
+You should see it consuming from Kafka, embedding the data, and storing it in Milvus.
 
-## 📝 License
-This project is MIT licensed.
+Terminal 3: Start the Serving API
+
+Bash
+uvicorn serving.api:app
+(Note: Do not use the --reload flag on Windows, as Uvicorn's child-process spawning conflicts with PyMilvus connection protocols).
+
+🧪 Testing the Engine
+Once the FastAPI server is running, navigate to the built-in Swagger UI:
+👉 http://127.0.0.1:8000/docs
+
+Open the POST /ask endpoint.
+
+Click Try it out.
+
+Submit a JSON payload matching the mock data themes, for example:
+
+JSON
+{
+  "question": "Is the cafeteria serving pizza today?"
+}
+Click Execute and watch Llama 3 answer based entirely on the live Kafka stream!
+
+🐛 Known Quirks & Engineering Notes
+During development, several open-source integration bugs were solved to ensure stability:
+
+LangChain Schema Mismatches: LangChain defaults to looking for a column named "vector". We explicitly pass vector_field="embedding" to match our custom database schema.
+
+Windows Multiprocessing vs. Milvus: Uvicorn's --reload flag on Windows drops the Milvus DB connection. The server must be run in the main thread for stability.
+
+LangChain-Milvus Connection Bugs: The newer langchain-milvus package has an active bug regarding connection aliases and localhost loopbacks. This project strategically utilizes the stable langchain_community.vectorstores implementation to ensure bulletproof database handshakes.
+
+***
