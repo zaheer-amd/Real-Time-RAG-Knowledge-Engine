@@ -1,83 +1,79 @@
-from fastapi import FastAPI
-from pydantic import BaseModel
-from langchain_community.llms import Ollama
-from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_milvus import Milvus
-import uvicorn
+import json
+import numpy as np
+from kafka import KafkaConsumer
+from pymilvus import connections, FieldSchema, CollectionSchema, DataType, Collection, utility
+from sentence_transformers import SentenceTransformer
 
 # ==========================================
-# 1. INITIALIZE FASTAPI
+# 1. INITIALIZE THE AI EMBEDDING MODEL
 # ==========================================
-app = FastAPI(title="Real-Time RAG Knowledge Engine")
-
-class QueryRequest(BaseModel):
-    question: str
+print("🧠 Loading AI Embedding Model (this might take a few seconds)...")
+# We use a lightning-fast, open-source model that runs locally on your CPU
+model = SentenceTransformer('all-MiniLM-L6-v2') 
+VECTOR_DIMENSION = 384 # This specific model outputs vectors with 384 dimensions
 
 # ==========================================
-# 2. INITIALIZE THE AI COMPONENTS
+# 2. CONNECT TO MILVUS & CREATE SCHEMA
 # ==========================================
-print("🧠 Booting up the Serving Layer...")
+print("🧊 Connecting to Milvus Vector Database...")
+connections.connect("default", host="localhost", port="19530")
 
-# The Librarian (Matches our PyFlink model)
-embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+COLLECTION_NAME = "employee_knowledge_base"
 
-# The Database Connection
-# We give LangChain the host/port so it can connect safely inside its own process
-vector_db = Milvus( 
-    embedding_function=embeddings,
-    connection_args={"host": "localhost", "port": "19530"},
-    collection_name="employee_knowledge_base",
-    vector_field="embedding", 
-    text_field="text",        
-    primary_field="id",
-    auto_id=True
+# If the collection already exists from a previous run, drop it so we start fresh
+if utility.has_collection(COLLECTION_NAME):
+    utility.drop_collection(COLLECTION_NAME)
+
+# Define the "columns" of our Vector Database
+fields = [
+    FieldSchema(name="id", dtype=DataType.VARCHAR, is_primary=True, max_length=100),
+    FieldSchema(name="department", dtype=DataType.VARCHAR, max_length=50),
+    FieldSchema(name="text", dtype=DataType.VARCHAR, max_length=1000),
+    FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=VECTOR_DIMENSION)
+]
+schema = CollectionSchema(fields, description="Real-time employee data")
+collection = Collection(name=COLLECTION_NAME, schema=schema)
+
+# Create an index to make similarity searches lightning fast
+index_params = {"metric_type": "L2", "index_type": "IVF_FLAT", "params": {"nlist": 1024}}
+collection.create_index(field_name="embedding", index_params=index_params)
+collection.load() # Load it into memory so it's ready to search
+
+# ==========================================
+# 3. THE STREAM PROCESSING LOOP
+# ==========================================
+print("🚀 Connected! Listening to Kafka for new data...\n")
+
+# Connect to our Kafka waiting room
+consumer = KafkaConsumer(
+    'employee_live_chat',
+    bootstrap_servers=['localhost:9092'],
+    value_deserializer=lambda m: json.loads(m.decode('utf-8')),
+    auto_offset_reset='latest' # Start reading the newest messages
 )
 
-# The Professor (Our local Llama 3 model running on Ollama)
-llm = Ollama(model="llama3")
+try:
+    for message in consumer:
+        doc = message.value
+        
+        # 1. CHUNKING (We skip complex chunking here since our mock data is already short sentences)
+        raw_text = doc['text']
+        
+        # 2. EMBEDDING (Translate the text into AI math)
+        # We wrap it in a list because the model expects a batch of sentences
+        vector = model.encode([raw_text])[0] 
+        
+        # 3. STORAGE (Insert into Milvus)
+        data = [
+            [doc['id']],
+            [doc['department']],
+            [raw_text],
+            [vector.tolist()] # Convert numpy array to standard Python list
+        ]
+        collection.insert(data)
+        
+        print(f"🧮 Embedded & Stored: [{doc['department']}] {raw_text[:40]}...")
 
-# The RAG Instruction Manual
-PROMPT_TEMPLATE = """
-You are an internal IT and HR support assistant for our company.
-Answer the employee's question using ONLY the following context from our live database.
-If the answer is not in the context, say "I don't have enough real-time data to answer that."
-Do not make things up.
-
-Context from live database:
-{context}
-
-Employee Question: 
-{question}
-
-Answer:
-"""
-
-# ==========================================
-# 3. THE API ENDPOINT
-# ==========================================
-@app.post("/ask")
-async def ask_question(request: QueryRequest):
-    print(f"\n💬 Received question: {request.question}")
-    
-    # Step 1: Ask the Librarian to find the 3 closest coordinates (documents)
-    search_results = vector_db.similarity_search(request.question, k=3)
-    
-    # Extract just the text from those documents
-    context_text = "\n".join([doc.page_content for doc in search_results])
-    print(f"📚 Librarian found {len(search_results)} relevant documents.")
-    
-    # Step 2: Write out the full prompt for the Professor
-    final_prompt = PROMPT_TEMPLATE.format(context=context_text, question=request.question)
-    
-    # Step 3: Hand it to the Professor (Llama 3) to generate the answer
-    print("🤖 Professor is thinking...")
-    answer = llm.invoke(final_prompt)
-    
-    return {
-        "question": request.question,
-        "retrieved_context": context_text,
-        "answer": answer
-    }
-
-if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+except KeyboardInterrupt:
+    print("\n🛑 Shutting down the processor.")
+    consumer.close()
